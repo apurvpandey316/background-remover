@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Background Remover</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --line: #e4e4df; --accent: #2f6fed; --accent-text: #fff; --stage: #ecece8;
+    --check-a: #ffffff; --check-b: #dedede; --danger: #c43d3d;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1e1e1c; --text: #ededea; --muted: #9a9a93;
+      --line: #2e2e2b; --accent: #5b8eff; --accent-text: #0b0b0a; --stage: #191918;
+      --check-a: #2b2b29; --check-b: #222220; --danger: #ff7a7a;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
+  header .note { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  button, .btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    padding: 7px 12px; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  button:hover, .btn:hover { border-color: var(--muted); }
+  .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .primary:hover { filter: brightness(1.08); border-color: var(--accent); }
+  .primary[aria-disabled="true"] { opacity: .5; pointer-events: none; }
+
+  main { display: grid; grid-template-columns: 1fr 300px; min-height: calc(100vh - 57px); }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+
+  .stage { position: relative; background: var(--stage); display: flex; align-items: center; justify-content: center; padding: 24px; min-height: 420px; }
+  .drop { width: min(560px, 100%); border: 2px dashed var(--line); border-radius: 16px; padding: 56px 24px; text-align: center; cursor: pointer; background: var(--panel); transition: border-color .15s, transform .15s; }
+  .drop:hover, .drop.over { border-color: var(--accent); }
+  .drop.over { transform: scale(1.01); }
+  .drop h2 { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+  .drop p { margin: 0; color: var(--muted); }
+
+  .viewer { display: none; position: relative; max-width: 100%; max-height: calc(100vh - 110px); border-radius: 10px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.12); user-select: none; }
+  .viewer.on { display: block; }
+  .viewer img { display: block; max-width: 100%; max-height: calc(100vh - 110px); }
+  .viewer .after { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .viewer .before { visibility: hidden; }
+  .viewer.comparing .before { visibility: visible; }
+  .viewer.comparing { touch-action: none; cursor: ew-resize; }
+  .viewer .backdrop { position: absolute; inset: 0; }
+  .bg-checker { background: conic-gradient(var(--check-b) 25%, var(--check-a) 0 50%, var(--check-b) 0 75%, var(--check-a) 0) 0 0 / 20px 20px; }
+  .divider { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.25); display: none; pointer-events: none; }
+  .viewer.comparing .divider { display: block; }
+  .divider::after { content: "⇆"; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 28px; height: 28px; border-radius: 50%; background: #fff; color: #222; display: grid; place-items: center; font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+
+  .busy { position: absolute; inset: 0; display: none; place-items: center; background: color-mix(in srgb, var(--stage) 70%, transparent); z-index: 2; }
+  .busy.on { display: grid; }
+  .busy .box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; display: flex; gap: 12px; align-items: center; }
+  .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  aside { border-left: 1px solid var(--line); background: var(--panel); padding: 18px; display: flex; flex-direction: column; gap: 18px; }
+  @media (max-width: 820px) { aside { border-left: 0; border-top: 1px solid var(--line); } }
+  aside h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; border-radius: 0; justify-content: center; background: transparent; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .seg button:disabled { opacity: .35; cursor: not-allowed; }
+  .field { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; margin-bottom: 12px; }
+  .field label { font-weight: 500; }
+  .field output { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .field input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+  .field small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+  .check { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .check input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .swatches { display: flex; gap: 8px; }
+  .swatch { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); padding: 0; cursor: pointer; }
+  .swatch.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .swatch input { opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+  .status { color: var(--muted); font-size: 12px; min-height: 18px; }
+  .status.err { color: var(--danger); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: auto; }
+  .actions .primary { flex: 1; justify-content: center; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Background Remover</h1>
+  <span class="note">Runs locally, nothing leaves your computer</span>
+  <span class="spacer"></span>
+  <button id="newBtn" hidden>New image</button>
+</header>
+
+<main>
+  <section class="stage" id="stage">
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choose an image">
+      <h2>Drop an image here</h2>
+      <p>or click to choose, or paste with Ctrl+V · JPG, PNG, WebP up to 25 MB</p>
+    </div>
+    <div class="viewer" id="viewer">
+      <div class="backdrop bg-checker" id="backdrop"></div>
+      <img class="before" id="beforeImg" alt="Original">
+      <img class="after" id="afterImg" alt="Background removed">
+      <div class="divider" id="divider"></div>
+    </div>
+    <div class="busy" id="busy"><div class="box"><div class="spinner"></div><span id="busyText">Removing background…</span></div></div>
+    <input type="file" id="file" accept="image/*" hidden>
+  </section>
+
+  <aside>
+    <div>
+      <h3>Output size</h3>
+      <div class="seg" id="scaleSeg">
+        <button data-scale="1" class="on">1×</button>
+        <button data-scale="2">2×</button>
+        <button data-scale="4">4×</button>
+      </div>
+      <div class="status" id="sizeInfo" style="margin-top:6px"></div>
+    </div>
+
+    <div>
+      <h3>Mask</h3>
+      <div class="field">
+        <label for="rescue">Recover faint areas</label><output for="rescue"></output>
+        <input type="range" id="rescue" min="0" max="100" step="1">
+        <small>Raise if parts of the subject look see-through</small>
+      </div>
+      <div class="field">
+        <label for="close">Bridge small gaps</label><output for="close"></output>
+        <input type="range" id="close" min="0" max="6" step="1">
+      </div>
+      <div class="field">
+        <label for="minSpeck">Remove specks</label><output for="minSpeck"></output>
+        <input type="range" id="minSpeck" min="0" max="1" step="0.05">
+      </div>
+      <label class="check"><input type="checkbox" id="fillHoles"> Fill holes inside the subject</label>
+    </div>
+
+    <div>
+      <h3>Edges</h3>
+      <div class="field">
+        <label for="shrink">Trim edge</label><output for="shrink"></output>
+        <input type="range" id="shrink" min="0" max="4" step="0.5">
+        <small>Raise if a rim of old background shows</small>
+      </div>
+      <div class="field">
+        <label for="feather">Softness</label><output for="feather"></output>
+        <input type="range" id="feather" min="0" max="2" step="0.1">
+      </div>
+      <label class="check"><input type="checkbox" id="sharpen"> Sharpen when enlarging</label>
+    </div>
+
+    <div>
+      <h3>Preview on</h3>
+      <div class="swatches" id="swatches">
+        <button class="swatch bg-checker on" data-bg="checker" title="Transparent"></button>
+        <button class="swatch" data-bg="#ffffff" style="background:#fff" title="White"></button>
+        <button class="swatch" data-bg="#111111" style="background:#111" title="Black"></button>
+        <label class="swatch" title="Custom colour" style="background:linear-gradient(135deg,#f55,#fc3,#3c6,#39f)"><input type="color" id="customBg" value="#2f6fed"></label>
+      </div>
+      <label class="check" style="margin-top:12px"><input type="checkbox" id="compare"> Compare with original</label>
+    </div>
+
+    <div class="status" id="status"></div>
+    <div class="actions">
+      <button id="resetBtn">Reset</button>
+      <a class="btn primary" id="download" aria-disabled="true" download>Download PNG</a>
+    </div>
+  </aside>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const SLIDERS = {
+  rescue: (v) => `${v}`,
+  close: (v) => `${v}px`,
+  minSpeck: (v) => `${(+v).toFixed(2)}%`,
+  shrink: (v) => `${v}px`,
+  feather: (v) => (+v).toFixed(1),
+};
+const CHECKS = ["fillHoles", "sharpen"];
+
+let defaults = {};
+let state = { id: null, name: "image", scale: 1, maxScale: 4, width: 0, height: 0 };
+let renderTimer = null, renderAbort = null, cutoutUrl = null, beforeUrl = null;
+
+function setStatus(text, isErr = false) {
+  $("status").textContent = text;
+  $("status").classList.toggle("err", isErr);
+}
+function busy(on, text) {
+  $("busy").classList.toggle("on", on);
+  if (text) $("busyText").textContent = text;
+}
+
+function applyDefaults() {
+  for (const k of Object.keys(SLIDERS)) $(k).value = defaults[k];
+  for (const k of CHECKS) $(k).checked = defaults[k];
+  state.scale = defaults.scale;
+  syncLabels();
+}
+function syncLabels() {
+  for (const [k, fmt] of Object.entries(SLIDERS)) document.querySelector(`output[for=${k}]`).textContent = fmt($(k).value);
+  for (const b of $("scaleSeg").children) {
+    const s = +b.dataset.scale;
+    b.classList.toggle("on", s === state.scale);
+    b.disabled = state.id && s > state.maxScale;
+  }
+  if (state.width) $("sizeInfo").textContent = `${state.width * state.scale} × ${state.height * state.scale} px`;
+}
+
+async function upload(file) {
+  if (!file || !file.type.startsWith("image/")) return setStatus("Please choose an image file.", true);
+  state.name = file.name.replace(/\.[^.]+$/, "") || "image";
+  if (beforeUrl) URL.revokeObjectURL(beforeUrl);
+  beforeUrl = URL.createObjectURL(file);
+  $("beforeImg").src = beforeUrl;
+  $("drop").hidden = true;
+  $("viewer").classList.add("on");
+  $("newBtn").hidden = false;
+  $("afterImg").removeAttribute("src");
+  setDownload(null);
+  busy(true, "Removing background… (first run loads the model)");
+  setStatus("");
+  try {
+    const t0 = performance.now();
+    const res = await fetch("/api/upload", { method: "POST", body: file });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    Object.assign(state, { id: data.id, width: data.width, height: data.height, maxScale: data.maxScale });
+    if (state.scale > state.maxScale) state.scale = state.maxScale;
+    syncLabels();
+    setStatus(`Background removed in ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+    await render();
+  } catch (e) {
+    busy(false);
+    setStatus(e.message || "Upload failed", true);
+  }
+}
+
+function scheduleRender() {
+  syncLabels();
+  if (!state.id) return;
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(render, 250);
+}
+
+async function render() {
+  if (!state.id) return;
+  renderAbort?.abort();
+  renderAbort = new AbortController();
+  const params = new URLSearchParams({ id: state.id, scale: state.scale });
+  for (const k of Object.keys(SLIDERS)) params.set(k, $(k).value);
+  for (const k of CHECKS) params.set(k, $(k).checked);
+  busy(true, state.scale > 1 ? `Rendering at ${state.scale}×…` : "Updating…");
+  try {
+    const res = await fetch(`/api/render?${params}`, { signal: renderAbort.signal });
+    if (!res.ok) throw new Error((await res.json()).error);
+    const blob = await res.blob();
+    if (cutoutUrl) URL.revokeObjectURL(cutoutUrl);
+    cutoutUrl = URL.createObjectURL(blob);
+    $("afterImg").src = cutoutUrl;
+    setDownload(cutoutUrl);
+    const w = res.headers.get("X-Width"), h = res.headers.get("X-Height");
+    setStatus(`${w} × ${h} px · ${(blob.size / 1024 / 1024).toFixed(2)} MB · rendered in ${res.headers.get("X-Render-Ms")} ms`);
+    busy(false);
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    busy(false);
+    setStatus(e.message || "Render failed", true);
+    if (/expired/.test(e.message)) state.id = null;
+  }
+}
+
+function setDownload(url) {
+  const a = $("download");
+  if (url) {
+    a.href = url;
+    a.download = `${state.name}-no-bg${state.scale > 1 ? `@${state.scale}x` : ""}.png`;
+    a.setAttribute("aria-disabled", "false");
+  } else {
+    a.removeAttribute("href");
+    a.setAttribute("aria-disabled", "true");
+  }
+}
+
+function reset() {
+  clearTimeout(renderTimer);
+  renderAbort?.abort();
+  state = { ...state, id: null, width: 0, height: 0 };
+  $("viewer").classList.remove("on");
+  $("drop").hidden = false;
+  $("newBtn").hidden = true;
+  $("sizeInfo").textContent = "";
+  setDownload(null);
+  setStatus("");
+  syncLabels();
+  $("file").value = "";
+}
+
+// Upload inputs: click, drag-and-drop, paste.
+$("drop").addEventListener("click", () => $("file").click());
+$("drop").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") $("file").click(); });
+$("file").addEventListener("change", (e) => upload(e.target.files[0]));
+$("newBtn").addEventListener("click", () => { reset(); $("file").click(); });
+const stage = $("stage");
+stage.addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
+stage.addEventListener("dragleave", () => $("drop").classList.remove("over"));
+stage.addEventListener("drop", (e) => { e.preventDefault(); $("drop").classList.remove("over"); upload(e.dataTransfer.files[0]); });
+window.addEventListener("paste", (e) => {
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+  if (item) upload(item.getAsFile());
+});
+
+// Controls.
+for (const k of Object.keys(SLIDERS)) $(k).addEventListener("input", scheduleRender);
+for (const k of CHECKS) $(k).addEventListener("change", scheduleRender);
+$("scaleSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b || b.disabled) return;
+  state.scale = +b.dataset.scale;
+  scheduleRender();
+});
+$("resetBtn").addEventListener("click", () => { applyDefaults(); scheduleRender(); });
+
+// Preview background.
+function setBackdrop(bg, el) {
+  for (const s of $("swatches").children) s.classList.toggle("on", s === el);
+  const d = $("backdrop");
+  d.classList.toggle("bg-checker", bg === "checker");
+  d.style.background = bg === "checker" ? "" : bg;
+}
+$("swatches").addEventListener("click", (e) => {
+  const b = e.target.closest("button.swatch");
+  if (b) setBackdrop(b.dataset.bg, b);
+});
+$("customBg").addEventListener("input", (e) => setBackdrop(e.target.value, e.target.parentElement));
+
+// Before/after compare: drag across the image to move the divider.
+let comparePos = 0.5;
+function placeDivider() {
+  const pct = comparePos * 100;
+  $("divider").style.left = `calc(${pct}% - 1px)`;
+  $("afterImg").style.clipPath = $("compare").checked ? `inset(0 0 0 ${pct}%)` : "";
+  $("backdrop").style.clipPath = $("afterImg").style.clipPath;
+}
+$("compare").addEventListener("change", () => {
+  $("viewer").classList.toggle("comparing", $("compare").checked);
+  placeDivider();
+});
+$("viewer").addEventListener("pointermove", (e) => {
+  if (!$("compare").checked) return;
+  const r = $("viewer").getBoundingClientRect();
+  comparePos = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  placeDivider();
+});
+
+fetch("/api/defaults").then((r) => r.json()).then((d) => { defaults = d; applyDefaults(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "background-remover",
+  "version": "1.0.0",
+  "description": "Local web app that removes image backgrounds with an on-device AI model",
+  "private": true,
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@imgly/background-removal-node": "1.4.5",
+    "sharp": "0.32.6"
+  },
+  "allowScripts": {
+    "onnxruntime-node@1.17.3": true,
+    "sharp@0.32.6": true
+  }
+}
